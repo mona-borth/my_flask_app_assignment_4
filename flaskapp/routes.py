@@ -50,7 +50,6 @@ def dashboard():
     graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
     return render_template('dashboard.html', title='Page views per day', graphJSON=graphJSON)
 
-# Route to the dashboard page
 @app.route('/demography2')
 def demography2():
     rows = (

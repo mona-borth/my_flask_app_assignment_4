@@ -1,6 +1,6 @@
 from flask import render_template, flash, redirect, url_for, request
 from flaskapp import app, db
-from flaskapp.models import BlogPost, IpView, Day
+from flaskapp.models import BlogPost, IpView, Day, UkData
 from flaskapp.forms import PostForm
 import datetime
 
@@ -8,6 +8,7 @@ import pandas as pd
 import json
 import plotly
 import plotly.express as px
+import numpy as np
 
 
 # Route for the home page, which is where the blog posts will be shown
@@ -49,6 +50,113 @@ def dashboard():
     graphJSON = json.dumps(fig, cls=plotly.utils.PlotlyJSONEncoder)
     return render_template('dashboard.html', title='Page views per day', graphJSON=graphJSON)
 
+# Route to the dashboard page
+@app.route('/demography2')
+def demography2():
+    rows = (
+    UkData.query
+    .with_entities(
+        UkData.country,
+        UkData.region,
+        UkData.Turnout19,
+        UkData.c11Female
+    )
+    .all())
+
+    df = (
+        pd.DataFrame(rows, columns=['Country','Region','Turnout', 'Female'])
+        .groupby(['Country','Region'], as_index=False)
+        .mean()          # if you have multiple entries per region
+        .sort_values('Turnout', ascending=False)
+    )
+ 
+    fig = px.bar(
+        df,
+        x='Region',
+        y='Turnout',
+        color='Female',
+        labels={'Turnout':'Turnout (%)',
+                'Female':  'Share of Women in the Population (%)'},
+        text='Region',
+        hover_data={
+        'Region': True,
+        'Turnout': ':.1f',   # one decimal place
+        'Female': ':.1f'
+        },
+        color_continuous_scale=px.colors.sequential.Viridis,
+        range_color=[50, 52]  # set the range of the color scale
+    )
+
+    fig_html = fig.to_html(full_html=False)
+    return render_template('dashboard.html', title='2019 Turnout by Region, Coloured by Share of Women in the Population', fig_html=fig_html)
+
+@app.route('/demography1')
+def demography1():
+    rows = (UkData.query
+    .with_entities(
+        UkData.c11Retired,
+        UkData.Turnout19,
+        UkData.BrexitVote19,
+        UkData.TotalVote19,
+        UkData.country,
+        UkData.constituency_name
+    )
+    .filter(UkData.country == 'England')
+    .all()
+    )
+
+    df = (pd.DataFrame(rows, columns=['Retiree', 'Turnout', 'BrexitVotes', 'TotalVotes', 'Country', 'Constituency']))
+
+    df['Brexit'] = df['BrexitVotes'] / df['TotalVotes']*100 # get Brexit Party vote share in percent
+    df = df.fillna({'Brexit': 0})
+
+    # Split data for plotting
+    df_nonzero = df[df['Brexit'] > 0]
+    df_zero = df[df['Brexit'] == 0]
+
+    # Plot with non-zero Brexit party votes
+    fig = px.scatter(
+        df_nonzero,
+        x='Retiree',
+        y='Turnout',
+        size='Brexit',
+        size_max=30,
+        color='Brexit',
+        hover_data={
+            'Retiree': ':.1f',
+            'Turnout': ':.1f',
+            'BrexitVotes': False,
+            'TotalVotes': False,
+            'Brexit': ':.2f',
+            'Constituency': True
+        },
+        labels={
+            'Retiree': 'Retiree (pct of population retired)',
+            'Turnout': 'Turnout (pct of electorate)',
+            'Brexit': 'Brexit Party Vote (pct)'
+        },
+        range_color=[0, 35]
+    )
+
+    # Add zero points
+    fig.add_scatter(
+        x=df_zero['Retiree'],
+        y=df_zero['Turnout'],
+        mode='markers',
+        marker=dict(size=4, symbol='circle', color='darkblue'),
+        showlegend=False,
+        customdata=np.stack([df_zero['Constituency'], df_zero['Brexit']], axis=1), # with help of ChatGPT for showing hover data correctly
+        hovertemplate=(
+            "Retiree (pct of population retired)=%{x:.1f}<br>"
+            "Turnout (pct of electorate)=%{y:.1f}<br>"
+            "Brexit Party Vote (pct)=0.0<br>"
+            "Constituency=%{customdata[0]}<extra></extra>"
+    )
+    )
+    
+    fig_html = fig.to_html(full_html=False)
+
+    return render_template('dashboard.html', title='Turnout, Retirees, and Brexit Party vote in Parliamentary Constituencies in England', fig_html=fig_html)
 
 @app.before_request
 def before_request_func():
